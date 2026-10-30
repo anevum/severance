@@ -1,0 +1,71 @@
+name: SEVERANCE prototype Godot smoke (no deployment)
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  godot-parse-and-private-network:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install official Godot 4.7.2 standard binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/severance-engine
+          curl --fail --location --retry 3 --silent --show-error \
+            'https://downloads.godotengine.org/?version=4.7.2&flavor=stable&slug=linux.x86_64.zip&platform=linux.64' \
+            -o /tmp/severance-engine/engine.zip
+          unzip -q /tmp/severance-engine/engine.zip -d /tmp/severance-engine
+          mv /tmp/severance-engine/Godot_v4.7.2-stable_linux.x86_64 /tmp/severance-engine/godot
+          chmod +x /tmp/severance-engine/godot
+          echo '/tmp/severance-engine' >> "$GITHUB_PATH"
+      - name: Import and parse Godot project
+        shell: bash
+        run: |
+          set -euo pipefail
+          godot --headless --editor --path prototype-001 --import --quit
+      - name: Run actual main scene and solo smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          godot --headless --path prototype-001 -s res://tests/smoke.gd | tee /tmp/severance-smoke.log
+          grep -q 'SEVERANCE_SMOKE_PASS' /tmp/severance-smoke.log
+      - name: Launch server and probe authoritative snapshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          godot --headless --path prototype-001 -- --server --port=8910 > /tmp/severance-server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 40); do
+            if grep -q 'SEVERANCE_SERVER_READY' /tmp/severance-server.log; then break; fi
+            sleep 0.5
+          done
+          cat /tmp/severance-server.log
+          grep -q 'SEVERANCE_SERVER_READY' /tmp/severance-server.log
+          timeout 30s godot --headless --path prototype-001 -- --probe-client --port=8910 \
+            > /tmp/severance-client.log 2>&1
+          cat /tmp/severance-client.log
+          grep -q 'SEVERANCE_PROBE_PASS' /tmp/severance-client.log
+          if grep -E 'SCRIPT ERROR|Parse Error|Invalid call|Invalid access' \
+             /tmp/severance-server.log /tmp/severance-client.log /tmp/severance-smoke.log; then
+            exit 1
+          fi
+      - name: Upload isolated diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: severance-prototype-001-headless-logs
+          path: |
+            /tmp/severance-smoke.log
+            /tmp/severance-server.log
+            /tmp/severance-client.log
+          if-no-files-found: ignore
+          retention-days: 14
