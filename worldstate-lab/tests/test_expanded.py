@@ -3,6 +3,7 @@ These are offline tests only; no clinician or network actor is authenticated.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import random
 import tempfile
@@ -11,6 +12,21 @@ from pathlib import Path
 
 from worldstate import World, WorldRuleError
 from worldstate.scenarios import seed_world
+
+
+def create_legacy_fixture(directory):
+    """Generate new synthetic data using the archived V0.1 engine, never real records."""
+    engine_path = Path(__file__).parent / 'legacy_v01' / 'engine.py'
+    spec = importlib.util.spec_from_file_location('severance_legacy_v01', engine_path)
+    legacy = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(legacy)
+    db = Path(directory) / 'legacy.sqlite3'
+    trace = Path(directory) / 'legacy.jsonl'
+    with legacy.World(db) as world:
+        world.apply('synthetic-event-1', 'AccountRegistered', 'system',
+                    {'account_id': 'synthetic-account'}, tick=1)
+        world.export_jsonl(trace)
+    return db, trace
 
 
 class ExpandedRules(unittest.TestCase):
@@ -295,12 +311,13 @@ class ExpandedRules(unittest.TestCase):
         self.assertEqual(5,self.w.stock('organization:union','food'))
 
     def test_27_old_v01_trace_replays_in_new_schema(self):
-        old=Path(__file__).parents[1]/'output'/'demo_events.jsonl'
-        with World.replay_jsonl(old) as w:
-            self.assertEqual(64,len(w.ledger()))
-            self.assertEqual(2,w.db.execute('PRAGMA user_version').fetchone()[0])
-            self.assertEqual(0,len(w.snapshot()['shipments']))
-            self.assertEqual('PASS',w.audit_state()['status'])
+        with tempfile.TemporaryDirectory() as directory:
+            _, trace = create_legacy_fixture(directory)
+            with World.replay_jsonl(trace) as world:
+                self.assertEqual(1, len(world.ledger()))
+                self.assertEqual(2, world.db.execute('PRAGMA user_version').fetchone()[0])
+                self.assertEqual(0, len(world.snapshot()['shipments']))
+                self.assertEqual('PASS', world.audit_state()['status'])
 
     def test_28_multiple_case_only_one_active_at_time(self):
         self.setup_medical()
@@ -435,16 +452,16 @@ class ExpandedRules(unittest.TestCase):
         self.assertEqual(5,self.row('shipments','shipment_id','S')['quantity'])
 
     def test_39_legacy_v01_sqlite_database_opens_and_audits(self):
-        import shutil
-        original=Path(__file__).parents[1]/'output'/'demo_world.sqlite3'
-        with tempfile.TemporaryDirectory() as d:
-            db=Path(d)/'old.sqlite3'
-            shutil.copy2(original,db)
+        with tempfile.TemporaryDirectory() as directory:
+            db, _ = create_legacy_fixture(directory)
+            import sqlite3
+            with sqlite3.connect(db) as legacy_db:
+                self.assertEqual(0, legacy_db.execute('PRAGMA user_version').fetchone()[0])
             with World(db) as older:
-                self.assertEqual(2,older.db.execute('PRAGMA user_version').fetchone()[0])
-                self.assertEqual(64,len(older.ledger()))
-                self.assertEqual('PASS',older.audit_state()['status'])
-                self.assertEqual([],older.snapshot()['medical_cases'])
+                self.assertEqual(2, older.db.execute('PRAGMA user_version').fetchone()[0])
+                self.assertEqual(1, len(older.ledger()))
+                self.assertEqual('PASS', older.audit_state()['status'])
+                self.assertEqual([], older.snapshot()['medical_cases'])
 
     def test_40_multi_seed_randomized_stress_replays_identically(self):
         from worldstate.stress import run_stress

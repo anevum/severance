@@ -6,7 +6,7 @@ Session: `ANEVUM.ANEVUM.BUILD.2026-10-29.001.SEVERANCE-WORLDSTATE-V03`
 
 This is an executable, isolated Python/SQLite **preproduction rules laboratory** for the ANEVUM game **SEVERANCE**, set on the fictional planet Eloden in TRANSCOSMIC. It is **not** a multiplayer game, browser scene, Godot project, medical system, login service or live deployment. No Internet connection, proprietary SDK, paid host, or API key is needed.
 
-V0.3 extends the original V0.1/V0.2 engines and preserves their previous **85 tests unchanged**, plus **40 V0.3 test cases**. It provides event schema tagging, transactional local migration, a bounded scheduled-work runner, synthetic consent-limited evidence access, and staged cargo convoys over physical Crown Valley route graphs.
+V0.3 extends the original V0.1/V0.2 engines and includes **85 legacy test cases** and **40 V0.3 test cases**; two compatibility tests now generate fresh synthetic data with the preserved V0.1 engine rather than reading archived databases. It provides event schema tagging, transactional local migration, a bounded scheduled-work runner, synthetic consent-limited evidence access, and staged cargo convoys over physical Crown Valley route graphs.
 
 ## Quick start
 
