@@ -1,0 +1,111 @@
+name: SEVERANCE isolated browser export (no deployment)
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export-webgl2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download official Godot 4.7.2 editor
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/severance-engine
+          curl --fail --location --retry 3 --silent --show-error \
+            'https://downloads.godotengine.org/?version=4.7.2&flavor=stable&slug=linux.x86_64.zip&platform=linux.64' \
+            -o /tmp/severance-engine/engine.zip
+          unzip -q /tmp/severance-engine/engine.zip -d /tmp/severance-engine
+          mv /tmp/severance-engine/Godot_v4.7.2-stable_linux.x86_64 /tmp/severance-engine/godot
+          chmod +x /tmp/severance-engine/godot
+          echo '/tmp/severance-engine' >> "$GITHUB_PATH"
+      - name: Install official matching Web export template
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --silent --show-error \
+            'https://downloads.godotengine.org/?flavor=stable&platform=templates&slug=export_templates.tpz&version=4.7.2' \
+            -o /tmp/severance-engine/templates.tpz
+          TARGET="$HOME/.local/share/godot/export_templates/4.7.2.stable"
+          mkdir -p "$TARGET"
+          unzip -p /tmp/severance-engine/templates.tpz templates/web_nothreads_release.zip > "$TARGET/web_nothreads_release.zip"
+          unzip -p /tmp/severance-engine/templates.tpz templates/version.txt > "$TARGET/version.txt"
+          test -s "$TARGET/web_nothreads_release.zip"
+          test -s "$TARGET/version.txt"
+          echo "Official single-thread Web template installed"
+      - name: Import and export browser build
+        shell: bash
+        run: |
+          set -euo pipefail
+          godot --headless --editor --path prototype-001 --import --quit
+          mkdir -p prototype-001/build/web
+          godot --headless --path prototype-001 --export-release Web build/web/index.html | tee /tmp/severance-web-export.log
+          test -s prototype-001/build/web/index.html
+          test -s prototype-001/build/web/index.wasm
+          test -s prototype-001/build/web/index.pck
+          test -s prototype-001/build/web/index.js
+          ! grep -E 'SCRIPT ERROR|Parse Error|Invalid call|Invalid access|ERROR:' /tmp/severance-web-export.log
+      - name: Verify isolated browser package
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, json
+          root = Path('prototype-001/build/web')
+          files = sorted(p for p in root.iterdir() if p.is_file())
+          required = {'index.html','index.wasm','index.pck','index.js'}
+          assert required.issubset({p.name for p in files}), 'Missing required Godot browser files'
+          assert b'WebAssembly' in (root/'index.js').read_bytes() or (root/'index.js').stat().st_size > 10000
+          manifest = {'product': 'SEVERANCE prototype 001',
+                      'public_release': False,
+                      'godot': '4.7.2',
+                      'files': [{'name':p.name, 'bytes':p.stat().st_size,
+                                 'sha256':hashlib.sha256(p.read_bytes()).hexdigest()} for p in files]}
+          (root/'dev-build-manifest.json').write_text(json.dumps(manifest,indent=2))
+          print('SEVERANCE_WEB_EXPORT_PASS')
+          print(json.dumps({f['name']:f['bytes'] for f in manifest['files']}, indent=2))
+          PY
+      - name: Chromium WebGL 2 gameplay render smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/severance-browser /tmp/severance-browser-shots
+          npm install --no-save --prefix /tmp/severance-browser playwright@1.56.1
+          command -v google-chrome || command -v google-chrome-stable || {
+            npx --prefix /tmp/severance-browser playwright install chromium
+          }
+          python3 -m http.server 8173 --bind 127.0.0.1 \
+            --directory prototype-001/build/web \
+            > /tmp/severance-http.log 2>&1 &
+          HTTP_PID=$!
+          trap 'kill "$HTTP_PID" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://127.0.0.1:8173/index.html; then break; fi
+            sleep 0.5
+          done
+          NODE_PATH=/tmp/severance-browser/node_modules node prototype-001/tests/browser-smoke.cjs
+      - name: Upload read-only browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: severance-prototype-001-chromium-visual-qa
+          path: |
+            /tmp/severance-browser-shots/
+            /tmp/severance-http.log
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Upload private review-only browser artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: severance-prototype-001-webgl2-review
+          path: prototype-001/build/web/
+          if-no-files-found: error
+          retention-days: 14

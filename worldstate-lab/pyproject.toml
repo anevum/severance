@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "severance-worldstate-lab"
+version = "0.3.0"
+description = "Offline deterministic world-state rules laboratory for ANEVUM SEVERANCE"
+requires-python = ">=3.10"
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "ANEVUM contributors" }]
+
+[tool.setuptools.packages.find]
+include = ["worldstate*"]
