@@ -1,6 +1,6 @@
 # TRANSCOSMIC: SEVERANCE
 
-SEVERANCE is an ANEVUM game in development, not a finished game or public multiplayer service.
+SEVERANCE is a parked ANEVUM family creative project. The prototypes below are preserved for possible future work; there is no current release or active development commitment. It is not a finished game or public multiplayer service.
 
 ## Prototype 001
 
